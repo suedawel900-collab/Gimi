@@ -1,4 +1,4 @@
-// index.js - Main Telegram Bot File with Telebirr Integration
+// index.js - Main Telegram Bot File (Render Optimized)
 require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const sqlite3 = require('sqlite3').verbose();
@@ -10,22 +10,54 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const winston = require('winston');
+const compression = require('compression');
+const rateLimit = require('express-rate-limit');
 const path = require('path');
 const fs = require('fs');
 
 // Import Telebirr service
 const telebirrService = require('./services/telebirr');
 
+// ==================== RENDER-SPECIFIC CONFIGURATION ====================
+const isRender = process.env.RENDER === 'true';
+const RENDER_EXTERNAL_URL = process.env.RENDER_EXTERNAL_URL || '';
+
+// Log Render environment
+if (isRender) {
+    console.log('🚀 Running on Render platform');
+    console.log(`📱 External URL: ${RENDER_EXTERNAL_URL}`);
+    console.log(`🔧 Service: ${process.env.RENDER_SERVICE_NAME || 'unknown'}`);
+    console.log(`🌿 Branch: ${process.env.RENDER_GIT_BRANCH || 'unknown'}`);
+    console.log(`📦 Instance: ${process.env.RENDER_INSTANCE_ID || 'unknown'}`);
+    
+    // Check for persistent disk
+    if (fs.existsSync('/var/data')) {
+        console.log('✅ Persistent disk mounted at /var/data');
+        
+        // Check write permissions
+        try {
+            fs.writeFileSync('/var/data/test.tmp', 'test');
+            fs.unlinkSync('/var/data/test.tmp');
+            console.log('✅ Disk is writable');
+        } catch (err) {
+            console.error('❌ Disk is not writable:', err.message);
+        }
+    } else {
+        console.warn('⚠️  Warning: /var/data not found. Database will be ephemeral!');
+        console.warn('   Add a persistent disk in Render dashboard for data persistence.');
+    }
+}
+
 // ==================== CONFIGURATION ====================
 const token = process.env.BOT_TOKEN;
-const adminIds = process.env.ADMIN_IDS ? process.env.ADMIN_IDS.split(',').map(id => parseInt(id)) : [];
-const PORT = process.env.PORT || 3000;
-const DB_PATH = process.env.DB_PATH || './bingo.db';
-const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
+const adminIds = process.env.ADMIN_IDS ? process.env.ADMIN_IDS.split(',').map(id => parseInt(id.trim())) : [];
+const PORT = process.env.PORT || 10000;
+const DB_PATH = process.env.DB_PATH || (isRender ? '/var/data/bingo.db' : './bingo.db');
+const BASE_URL = isRender ? RENDER_EXTERNAL_URL : `http://localhost:${PORT}`;
 
 // Validate bot token
 if (!token || token === 'YOUR_BOT_TOKEN_HERE') {
-    console.error('❌ Please set your BOT_TOKEN in .env file!');
+    console.error('❌ Please set your BOT_TOKEN in environment variables!');
     process.exit(1);
 }
 
@@ -66,6 +98,7 @@ async function initializeDatabase() {
         const dataDir = path.dirname(DB_PATH);
         if (!fs.existsSync(dataDir)) {
             fs.mkdirSync(dataDir, { recursive: true });
+            console.log(`📁 Created data directory: ${dataDir}`);
         }
 
         db = await open({
@@ -159,6 +192,25 @@ async function initializeDatabase() {
         `);
 
         logger.info('✅ Database initialized successfully');
+        
+        // Check if there's an active game, if not create a waiting game
+        const activeGame = await db.get('SELECT * FROM games WHERE status = "active"');
+        if (!activeGame) {
+            const waitingGame = await db.get('SELECT * FROM games WHERE status = "waiting"');
+            if (!waitingGame) {
+                await db.run(
+                    `INSERT INTO games 
+                        (game_type, prize_amount, card_price, status, started_at) 
+                    VALUES (?, ?, ?, ?, ?)`,
+                    ['full house', 
+                     parseInt(process.env.DEFAULT_PRIZE || 2000), 
+                     parseInt(process.env.DEFAULT_CARD_PRICE || 10), 
+                     'waiting', 
+                     new Date().toISOString()]
+                );
+                logger.info('Created default waiting game');
+            }
+        }
     } catch (error) {
         logger.error('❌ Database initialization failed:', error);
         process.exit(1);
@@ -175,21 +227,46 @@ const io = socketIo(server, {
     }
 });
 
+// Rate limiting
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100 // limit each IP to 100 requests per windowMs
+});
+
+// Middleware
 app.use(helmet({
     contentSecurityPolicy: false
 }));
 app.use(cors());
+app.use(compression());
 app.use(express.json());
 app.use(morgan('combined'));
+app.use(limiter);
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Ensure templates directory exists and serve
+const templatesDir = path.join(__dirname, 'templates');
+if (!fs.existsSync(templatesDir)) {
+    fs.mkdirSync(templatesDir, { recursive: true });
+}
 
 // Serve templates
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'templates', 'index.html'));
+    const indexPath = path.join(templatesDir, 'index.html');
+    if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+    } else {
+        res.status(404).send('Template not found');
+    }
 });
 
 app.get('/bingo-webapp', (req, res) => {
-    res.sendFile(path.join(__dirname, 'templates', 'index.html'));
+    const indexPath = path.join(templatesDir, 'index.html');
+    if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+    } else {
+        res.status(404).send('Template not found');
+    }
 });
 
 // Health check endpoint
@@ -197,8 +274,82 @@ app.get('/health', (req, res) => {
     res.json({ 
         status: 'ok', 
         timestamp: new Date().toISOString(),
-        bot: bot.isPolling() ? 'running' : 'stopped'
+        platform: isRender ? 'render' : 'local',
+        database: !!db,
+        uptime: process.uptime()
     });
+});
+
+// API endpoint for game stats
+app.get('/api/stats', async (req, res) => {
+    try {
+        const game = await db.get('SELECT * FROM games WHERE status = "active" ORDER BY game_id DESC LIMIT 1');
+        
+        if (!game) {
+            return res.json({ active: false });
+        }
+
+        const players = await db.all(
+            'SELECT u.username, COUNT(c.card_id) as card_count FROM users u JOIN cards c ON u.user_id = c.user_id WHERE c.game_id = ? GROUP BY u.user_id',
+            game.game_id
+        );
+
+        const totalCards = await db.get('SELECT COUNT(*) as count FROM cards WHERE game_id = ?', game.game_id);
+
+        const stats = {
+            active: true,
+            game_id: game.game_id,
+            game_type: game.game_type,
+            prize_amount: game.prize_amount,
+            card_price: game.card_price,
+            called_numbers: JSON.parse(game.called_numbers),
+            called_count: JSON.parse(game.called_numbers).length,
+            winners: JSON.parse(game.winners),
+            players: players,
+            total_players: players.length,
+            total_cards: totalCards.count
+        };
+
+        res.json(stats);
+    } catch (error) {
+        logger.error('API error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// API endpoint for user stats
+app.get('/api/user/:userId', async (req, res) => {
+    try {
+        const userId = req.params.userId;
+        
+        const user = await db.get(
+            'SELECT user_id, username, balance, total_wins, total_cards_bought, total_spent, total_won, created_at, last_active FROM users WHERE user_id = ?',
+            userId
+        );
+        
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        const cards = await db.get(
+            'SELECT COUNT(*) as total, SUM(CASE WHEN is_winner = 1 THEN 1 ELSE 0 END) as winners FROM cards WHERE user_id = ?',
+            userId
+        );
+
+        const recentTransactions = await db.all(
+            'SELECT * FROM transactions WHERE user_id = ? ORDER BY created_at DESC LIMIT 10',
+            userId
+        );
+
+        res.json({
+            ...user,
+            cards: cards || { total: 0, winners: 0 },
+            recent_transactions: recentTransactions
+        });
+    } catch (error) {
+        logger.error('API error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
 });
 
 // ==================== TELEBIRR PAYMENT ROUTES ====================
@@ -218,7 +369,7 @@ app.post('/api/create-payment', async (req, res) => {
             // Auto-register user
             await db.run(
                 'INSERT INTO users (user_id, username, balance) VALUES (?, ?, ?)',
-                [userId, userName || `user_${userId}`, 1000]
+                [userId, userName || `user_${userId}`, parseInt(process.env.DEFAULT_BALANCE || 1000)]
             );
         }
 
@@ -256,7 +407,7 @@ app.post('/api/create-payment', async (req, res) => {
 // Payment success return URL
 app.get('/payment/success', async (req, res) => {
     try {
-        const { outTradeNo, totalAmount, tradeStatus, paymentTime } = req.query;
+        const { outTradeNo, totalAmount, tradeStatus } = req.query;
         
         logger.info(`Payment callback received: ${outTradeNo}, status: ${tradeStatus}`);
         
@@ -276,14 +427,12 @@ app.get('/payment/success', async (req, res) => {
                 
                 if (game) {
                     // Generate and save cards
-                    const cardNumbers = [];
                     for (const cardId of cards) {
                         const cardNumbersData = generateBingoCard(cardId);
                         await db.run(
                             'INSERT INTO cards (user_id, game_id, card_number, numbers) VALUES (?, ?, ?, ?)',
                             [transaction.user_id, game.game_id, cardId, JSON.stringify(cardNumbersData)]
                         );
-                        cardNumbers.push(cardId);
                     }
                     
                     // Update user balance
@@ -559,9 +708,9 @@ io.on('connection', (socket) => {
             if (!user) {
                 await db.run(
                     'INSERT INTO users (user_id, username, balance) VALUES (?, ?, ?)',
-                    [user_id, name || `user_${user_id}`, 1000]
+                    [user_id, name || `user_${user_id}`, parseInt(process.env.DEFAULT_BALANCE || 1000)]
                 );
-                user = { user_id, balance: 1000 };
+                user = { user_id, balance: parseInt(process.env.DEFAULT_BALANCE || 1000) };
             }
             
             // Get current game
@@ -1119,7 +1268,9 @@ bot.onText(/\/start/, async (msg) => {
     try {
         await registerUser(msg);
         
-        const webAppUrl = `${BASE_URL}/bingo-webapp`;
+        const webAppUrl = isRender 
+            ? `${RENDER_EXTERNAL_URL}/` 
+            : `${BASE_URL}/bingo-webapp`;
         
         const keyboard = {
             inline_keyboard: [[
@@ -1177,75 +1328,410 @@ bot.onText(/\/balance/, async (msg) => {
     }
 });
 
-// API endpoint for game stats
-app.get('/api/stats', async (req, res) => {
+// My Cards command
+bot.onText(/\/mycards/, async (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+
+    try {
+        const game = await db.get('SELECT * FROM games WHERE status IN ("active", "waiting") ORDER BY game_id DESC LIMIT 1');
+        
+        if (!game) {
+            return bot.sendMessage(chatId, 'No active game.');
+        }
+
+        const cards = await db.all(
+            'SELECT * FROM cards WHERE user_id = ? AND game_id = ? ORDER BY card_number',
+            [userId, game.game_id]
+        );
+
+        if (cards.length === 0) {
+            return bot.sendMessage(chatId, 'You have no cards in the current game. Use /buy to purchase cards!');
+        }
+
+        const calledNumbers = JSON.parse(game.called_numbers);
+        
+        let message = `🎮 *Your Cards (Game #${game.game_id})*\n\n`;
+        message += `Game Type: ${game.game_type}\n`;
+        message += `Prize: ${game.prize_amount} ETB\n`;
+        message += `Called Numbers: ${calledNumbers.length}/75\n\n`;
+
+        for (const card of cards) {
+            const numbers = JSON.parse(card.numbers);
+            const markedCount = numbers.filter(n => 
+                n !== 'FREE' && calledNumbers.includes(n)
+            ).length;
+            
+            message += `🎫 *Card #${card.card_number}* (${markedCount}/24 marked)\n`;
+            
+            if (card.is_winner) {
+                message += `🏆 *WINNER CARD!*\n`;
+            }
+            
+            message += formatCard(numbers, calledNumbers);
+            message += '\n';
+        }
+
+        // Split if too long
+        if (message.length > 4000) {
+            const chunks = message.match(/[\s\S]{1,4000}/g) || [];
+            for (const chunk of chunks) {
+                await bot.sendMessage(chatId, chunk, { parse_mode: 'Markdown' });
+            }
+        } else {
+            await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+        }
+    } catch (error) {
+        logger.error('Error in /mycards:', error);
+        await bot.sendMessage(chatId, '❌ An error occurred while fetching your cards.');
+    }
+});
+
+// Stats command
+bot.onText(/\/stats/, async (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+
+    try {
+        const stats = await db.get(`
+            SELECT 
+                u.balance,
+                u.total_wins,
+                u.total_cards_bought,
+                u.total_spent,
+                u.total_won,
+                COUNT(DISTINCT t.transaction_id) as total_transactions,
+                (SELECT COUNT(*) FROM cards WHERE user_id = ? AND is_winner = 1) as winning_cards
+            FROM users u
+            LEFT JOIN transactions t ON u.user_id = t.user_id
+            WHERE u.user_id = ?
+            GROUP BY u.user_id
+        `, [userId, userId]);
+
+        if (!stats) {
+            return bot.sendMessage(chatId, '❌ Please use /start first to register.');
+        }
+
+        const winRate = stats.total_cards_bought ? 
+            ((stats.winning_cards / stats.total_cards_bought) * 100).toFixed(1) : 0;
+        const roi = stats.total_spent ? 
+            (((stats.total_won - stats.total_spent) / stats.total_spent) * 100).toFixed(1) : 0;
+
+        let message = `📊 *Your Statistics*\n\n`;
+        message += `💰 Current Balance: *${stats.balance} ETB*\n`;
+        message += `🏆 Total Wins: *${stats.total_wins || 0}*\n`;
+        message += `🎫 Winning Cards: *${stats.winning_cards || 0}*\n`;
+        message += `🃏 Cards Bought: *${stats.total_cards_bought || 0}*\n`;
+        message += `📈 Win Rate: *${winRate}%*\n`;
+        message += `💸 Total Spent: *${stats.total_spent || 0} ETB*\n`;
+        message += `💵 Total Won: *${stats.total_won || 0} ETB*\n`;
+        message += `📊 ROI: *${roi}%*\n`;
+        message += `💳 Transactions: *${stats.total_transactions || 0}*`;
+
+        await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+    } catch (error) {
+        logger.error('Error in /stats:', error);
+        await bot.sendMessage(chatId, '❌ An error occurred while fetching your statistics.');
+    }
+});
+
+// ==================== ADMIN COMMANDS ====================
+
+// Start new game (Admin only)
+bot.onText(/\/newgame/, async (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+
+    if (!isAdmin(userId)) {
+        return bot.sendMessage(chatId, '❌ Admin only command!');
+    }
+
+    try {
+        // End current active game if exists
+        await db.run('UPDATE games SET status = "ended", ended_at = ? WHERE status = "active"', 
+            [new Date().toISOString()]);
+
+        // Create new game
+        const result = await db.run(
+            `INSERT INTO games 
+                (game_type, prize_amount, card_price, status, started_by, started_at) 
+            VALUES (?, ?, ?, ?, ?, ?)`,
+            ['full house', 
+             parseInt(process.env.DEFAULT_PRIZE || 2000), 
+             parseInt(process.env.DEFAULT_CARD_PRICE || 10), 
+             'active', 
+             userId, 
+             new Date().toISOString()]
+        );
+
+        await bot.sendMessage(chatId, 
+            `✅ *New Bingo Round Started!*\n\n` +
+            `Game ID: #${result.lastID}\n` +
+            `Type: full house\n` +
+            `Prize: ${process.env.DEFAULT_PRIZE || 2000} ETB\n` +
+            `Card Price: ${process.env.DEFAULT_CARD_PRICE || 10} ETB\n\n` +
+            `Players can now buy cards using /buy [quantity]`,
+            { parse_mode: 'Markdown' }
+        );
+
+        logger.info(`New game started by admin ${userId}`);
+    } catch (error) {
+        logger.error('Error in /newgame:', error);
+        await bot.sendMessage(chatId, '❌ An error occurred while starting new game.');
+    }
+});
+
+// Call next number (Admin only)
+bot.onText(/\/call/, async (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+
+    if (!isAdmin(userId)) {
+        return bot.sendMessage(chatId, '❌ Admin only command!');
+    }
+
     try {
         const game = await db.get('SELECT * FROM games WHERE status = "active" ORDER BY game_id DESC LIMIT 1');
         
         if (!game) {
-            return res.json({ active: false });
+            return bot.sendMessage(chatId, '❌ No active game. Use /newgame to start one.');
         }
 
-        const players = await db.all(
-            'SELECT u.username, COUNT(c.card_id) as card_count FROM users u JOIN cards c ON u.user_id = c.user_id WHERE c.game_id = ? GROUP BY u.user_id',
-            game.game_id
+        const calledNumbers = JSON.parse(game.called_numbers);
+        
+        if (calledNumbers.length >= 75) {
+            return bot.sendMessage(chatId, '❌ All numbers have been called!');
+        }
+
+        // Generate next number
+        let number;
+        do {
+            number = Math.floor(Math.random() * 75) + 1;
+        } while (calledNumbers.includes(number));
+
+        calledNumbers.push(number);
+        
+        // Update game
+        await db.run(
+            'UPDATE games SET called_numbers = ? WHERE game_id = ?',
+            [JSON.stringify(calledNumbers), game.game_id]
         );
 
-        const totalCards = await db.get('SELECT COUNT(*) as count FROM cards WHERE game_id = ?', game.game_id);
+        // Log called number
+        await db.run(
+            'INSERT INTO called_numbers_log (game_id, number) VALUES (?, ?)',
+            [game.game_id, number]
+        );
 
-        const stats = {
-            active: true,
-            game_id: game.game_id,
-            game_type: game.game_type,
-            prize_amount: game.prize_amount,
-            card_price: game.card_price,
-            called_numbers: JSON.parse(game.called_numbers),
-            called_count: JSON.parse(game.called_numbers).length,
-            winners: JSON.parse(game.winners),
-            players: players,
-            total_players: players.length,
-            total_cards: totalCards.count
-        };
+        // Check for winners
+        const newWinners = await checkWinners(game.game_id, number);
 
-        res.json(stats);
+        // Format number for display
+        let letter = '';
+        if (number <= 15) letter = 'B';
+        else if (number <= 30) letter = 'I';
+        else if (number <= 45) letter = 'N';
+        else if (number <= 60) letter = 'G';
+        else letter = 'O';
+
+        // Announce number
+        const numberMessage = `🎲 *NEW NUMBER CALLED!*\n\n` +
+            `🔢 Number: *${letter}-${number}*\n` +
+            `📊 Total Called: *${calledNumbers.length}/75*\n` +
+            `${newWinners.length > 0 ? `🏆 New Winners: *${newWinners.length}*` : ''}`;
+
+        await bot.sendMessage(chatId, numberMessage, { parse_mode: 'Markdown' });
+        
+        logger.info(`Number ${number} called by admin ${userId}`);
     } catch (error) {
-        logger.error('API error:', error);
-        res.status(500).json({ error: 'Internal server error' });
+        logger.error('Error in /call:', error);
+        await bot.sendMessage(chatId, '❌ An error occurred while calling number.');
     }
 });
 
-// API endpoint for user stats
-app.get('/api/user/:userId', async (req, res) => {
-    try {
-        const userId = req.params.userId;
-        
-        const user = await db.get(
-            'SELECT user_id, username, balance, total_wins, total_cards_bought, total_spent, total_won, created_at, last_active FROM users WHERE user_id = ?',
-            userId
+// Set game type (Admin only)
+bot.onText(/\/settype (.+)/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const gameType = match[1].toLowerCase();
+
+    if (!isAdmin(userId)) {
+        return bot.sendMessage(chatId, '❌ Admin only command!');
+    }
+
+    const validTypes = ['full house', '1 row', '1 column', '4 corners', 'x shape', 'random'];
+    
+    if (!validTypes.includes(gameType)) {
+        return bot.sendMessage(chatId, 
+            `❌ Invalid game type. Valid types:\n${validTypes.map(t => `• ${t}`).join('\n')}`
         );
+    }
+
+    try {
+        const game = await db.get('SELECT * FROM games WHERE status = "active" ORDER BY game_id DESC LIMIT 1');
         
-        if (!user) {
-            return res.status(404).json({ error: 'User not found' });
+        if (!game) {
+            return bot.sendMessage(chatId, '❌ No active game. Use /newgame to start one.');
         }
 
-        const cards = await db.all(
-            'SELECT COUNT(*) as total, SUM(CASE WHEN is_winner = 1 THEN 1 ELSE 0 END) as winners FROM cards WHERE user_id = ?',
-            userId
-        );
+        await db.run('UPDATE games SET game_type = ? WHERE game_id = ?', [gameType, game.game_id]);
 
-        const recentTransactions = await db.all(
-            'SELECT * FROM transactions WHERE user_id = ? ORDER BY created_at DESC LIMIT 10',
-            userId
-        );
-
-        res.json({
-            ...user,
-            cards: cards[0],
-            recent_transactions: recentTransactions
-        });
+        await bot.sendMessage(chatId, `✅ Game type updated to: *${gameType}*`, { parse_mode: 'Markdown' });
+        
+        logger.info(`Game type changed to ${gameType} by admin ${userId}`);
     } catch (error) {
-        logger.error('API error:', error);
-        res.status(500).json({ error: 'Internal server error' });
+        logger.error('Error in /settype:', error);
+        await bot.sendMessage(chatId, '❌ An error occurred while setting game type.');
+    }
+});
+
+// Set prize (Admin only)
+bot.onText(/\/setprize (\d+)/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const prize = parseInt(match[1]);
+
+    if (!isAdmin(userId)) {
+        return bot.sendMessage(chatId, '❌ Admin only command!');
+    }
+
+    if (prize < 100) {
+        return bot.sendMessage(chatId, '❌ Prize must be at least 100 ETB.');
+    }
+
+    try {
+        const game = await db.get('SELECT * FROM games WHERE status = "active" ORDER BY game_id DESC LIMIT 1');
+        
+        if (!game) {
+            return bot.sendMessage(chatId, '❌ No active game. Use /newgame to start one.');
+        }
+
+        await db.run('UPDATE games SET prize_amount = ? WHERE game_id = ?', [prize, game.game_id]);
+
+        await bot.sendMessage(chatId, `✅ Prize updated to: *${prize} ETB*`, { parse_mode: 'Markdown' });
+        
+        logger.info(`Prize changed to ${prize} by admin ${userId}`);
+    } catch (error) {
+        logger.error('Error in /setprize:', error);
+        await bot.sendMessage(chatId, '❌ An error occurred while setting prize.');
+    }
+});
+
+// Set card price (Admin only)
+bot.onText(/\/setprice (\d+)/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const price = parseInt(match[1]);
+
+    if (!isAdmin(userId)) {
+        return bot.sendMessage(chatId, '❌ Admin only command!');
+    }
+
+    if (price < 1) {
+        return bot.sendMessage(chatId, '❌ Price must be at least 1 ETB.');
+    }
+
+    try {
+        const game = await db.get('SELECT * FROM games WHERE status = "active" ORDER BY game_id DESC LIMIT 1');
+        
+        if (!game) {
+            return bot.sendMessage(chatId, '❌ No active game. Use /newgame to start one.');
+        }
+
+        await db.run('UPDATE games SET card_price = ? WHERE game_id = ?', [price, game.game_id]);
+
+        await bot.sendMessage(chatId, `✅ Card price updated to: *${price} ETB*`, { parse_mode: 'Markdown' });
+        
+        logger.info(`Card price changed to ${price} by admin ${userId}`);
+    } catch (error) {
+        logger.error('Error in /setprice:', error);
+        await bot.sendMessage(chatId, '❌ An error occurred while setting card price.');
+    }
+});
+
+// End game (Admin only)
+bot.onText(/\/endgame/, async (msg) => {
+    const chatId = msg.chat.id;
+    const userId =msg.from.id;
+
+    if (!isAdmin(userId)) {
+        return bot.sendMessage(chatId, '❌ Admin only command!');
+    }
+
+    try {
+        const game = await db.get('SELECT * FROM games WHERE status = "active" ORDER BY game_id DESC LIMIT 1');
+        
+        if (!game) {
+            return bot.sendMessage(chatId, '❌ No active game.');
+        }
+
+        const winners = JSON.parse(game.winners);
+        
+        await db.run(
+            'UPDATE games SET status = "ended", ended_at = ? WHERE game_id = ?',
+            [new Date().toISOString(), game.game_id]
+        );
+
+        let message = `✅ *Game #${game.game_id} Ended*\n\n`;
+        message += `📊 Total Called Numbers: ${JSON.parse(game.called_numbers).length}/75\n`;
+        message += `🏆 Winners: ${winners.length}\n`;
+        message += `👥 Total Players: ${game.total_players}\n`;
+        message += `🃏 Total Cards: ${game.total_cards}\n`;
+        
+        if (winners.length > 0) {
+            message += `💰 Total Prize Distributed: ${game.prize_amount} ETB\n`;
+        } else {
+            message += `❌ No winners this round!\n`;
+        }
+
+        await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+        
+        logger.info(`Game ended by admin ${userId}`);
+    } catch (error) {
+        logger.error('Error in /endgame:', error);
+        await bot.sendMessage(chatId, '❌ An error occurred while ending game.');
+    }
+});
+
+// Admin stats
+bot.onText(/\/adminstats/, async (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+
+    if (!isAdmin(userId)) {
+        return bot.sendMessage(chatId, '❌ Admin only command!');
+    }
+
+    try {
+        const stats = await db.get(`
+            SELECT 
+                (SELECT COUNT(*) FROM users) as total_users,
+                (SELECT COUNT(*) FROM games) as total_games,
+                (SELECT COUNT(*) FROM cards) as total_cards,
+                (SELECT COUNT(*) FROM transactions) as total_transactions,
+                (SELECT SUM(amount) FROM transactions WHERE type = 'purchase') as total_revenue,
+                (SELECT SUM(amount) FROM transactions WHERE type = 'win') as total_payouts,
+                (SELECT COUNT(*) FROM games WHERE status = 'active') as active_games,
+                (SELECT COUNT(*) FROM users WHERE last_active > datetime('now', '-1 day')) as active_today
+        `);
+
+        const profit = (stats.total_revenue || 0) - (stats.total_payouts || 0);
+
+        let message = `📊 *Admin Statistics*\n\n`;
+        message += `👥 Total Users: *${stats.total_users}*\n`;
+        message += `📈 Active Today: *${stats.active_today}*\n`;
+        message += `🎮 Total Games: *${stats.total_games}*\n`;
+        message += `🃏 Total Cards: *${stats.total_cards}*\n`;
+        message += `💳 Transactions: *${stats.total_transactions}*\n`;
+        message += `💰 Total Revenue: *${stats.total_revenue || 0} ETB*\n`;
+        message += `💸 Total Payouts: *${stats.total_payouts || 0} ETB*\n`;
+        message += `📊 Profit: *${profit} ETB*\n`;
+        message += `🎯 Active Games: *${stats.active_games}*`;
+
+        await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+    } catch (error) {
+        logger.error('Error in /adminstats:', error);
+        await bot.sendMessage(chatId, '❌ An error occurred while fetching admin stats.');
     }
 });
 
@@ -1254,25 +1740,6 @@ app.get('/api/user/:userId', async (req, res) => {
 async function main() {
     try {
         await initializeDatabase();
-        
-        // Check if there's an active game, if not create a waiting game
-        const activeGame = await db.get('SELECT * FROM games WHERE status = "active"');
-        if (!activeGame) {
-            const waitingGame = await db.get('SELECT * FROM games WHERE status = "waiting"');
-            if (!waitingGame) {
-                await db.run(
-                    `INSERT INTO games 
-                        (game_type, prize_amount, card_price, status, started_at) 
-                    VALUES (?, ?, ?, ?, ?)`,
-                    ['full house', 
-                     parseInt(process.env.DEFAULT_PRIZE || 2000), 
-                     parseInt(process.env.DEFAULT_CARD_PRICE || 10), 
-                     'waiting', 
-                     new Date().toISOString()]
-                );
-                logger.info('Created default waiting game');
-            }
-        }
         
         // Set bot commands
         await bot.setMyCommands([
@@ -1305,10 +1772,20 @@ process.on('SIGTERM', async () => {
     process.exit(0);
 });
 
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+    logger.error('Uncaught Exception:', error);
+});
+
+process.on('unhandledRejection', (error) => {
+    logger.error('Unhandled Rejection:', error);
+});
+
 // Start server
 server.listen(PORT, () => {
     logger.info(`🌐 Web server running on port ${PORT}`);
     logger.info(`📱 Web App available at http://localhost:${PORT}`);
+    logger.info(`🌍 Public URL: ${BASE_URL}`);
 });
 
 main().catch(console.error);
