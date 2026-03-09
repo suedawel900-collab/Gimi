@@ -1,0 +1,69 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+
+# Database
+*.db
+*.db-journal
+*.sqlite
+*.db.backup*
+*.db-wal
+*.db-shm
+
+# Environment
+.env
+.env.local
+.env.production
+.env.development
+
+# Logs
+logs/
+*.log
+combined.log
+error.log
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Tests
+test/
+tests/
+coverage/
+
+# README
+README.md
+README*
+
+# Temp files
+tmp/
+temp/
+*.tmp
+
+# Docker files (not needed on Render)
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose.*
+
+# PM2
+ecosystem.config.js
+.pm2/
+pm2-*.log
+
+# Railway (not needed on Render)
+railway.json
+nixpacks.toml
