@@ -1,1 +1,45 @@
+version: '3.8'
 
+services:
+  bingo-bot:
+    build: .
+    container_name: mk-bingo-bot
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DB_PATH=/app/data/bingo.db
+      - BOT_TOKEN=${BOT_TOKEN}
+      - ADMIN_IDS=${ADMIN_IDS}
+      - DEFAULT_BALANCE=1000
+      - DEFAULT_CARD_PRICE=10
+      - DEFAULT_PRIZE=2000
+      - MAX_CARDS_PER_BUY=10
+      - TELEBIRR_APP_ID=${TELEBIRR_APP_ID}
+      - TELEBIRR_APP_KEY=${TELEBIRR_APP_KEY}
+      - TELEBIRR_SHORT_CODE=${TELEBIRR_SHORT_CODE}
+      - TELEBIRR_PUBLIC_KEY=${TELEBIRR_PUBLIC_KEY}
+      - TELEBIRR_ENVIRONMENT=${TELEBIRR_ENVIRONMENT:-test}
+      - TELEBIRR_RETURN_URL=${TELEBIRR_RETURN_URL:-http://localhost:3000/payment/success}
+      - TELEBIRR_NOTIFY_URL=${TELEBIRR_NOTIFY_URL:-http://localhost:3000/payment/notify}
+    volumes:
+      - bingo-data:/app/data
+      - ./logs:/usr/src/app/logs
+    networks:
+      - bingo-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  bingo-data:
+    name: mk-bingo-data
+
+networks:
+  bingo-network:
+    name: mk-bingo-network
+    driver: bridge
