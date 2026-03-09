@@ -24,7 +24,10 @@ class TelebirrPayment {
     encryptData(data) {
         try {
             const buffer = Buffer.from(JSON.stringify(data));
-            const encrypted = crypto.publicEncrypt(this.publicKey, buffer);
+            const encrypted = crypto.publicEncrypt({
+                key: this.publicKey,
+                padding: crypto.constants.RSA_PKCS1_PADDING
+            }, buffer);
             return encrypted.toString('base64');
         } catch (error) {
             console.error('Encryption error:', error);
@@ -86,7 +89,8 @@ class TelebirrPayment {
                 {
                     headers: {
                         'Content-Type': 'application/json'
-                    }
+                    },
+                    timeout: 30000
                 }
             );
 
@@ -127,12 +131,6 @@ class TelebirrPayment {
                     success: false,
                     error: 'Invalid signature'
                 };
-            }
-
-            // Decrypt data if encrypted
-            let paymentData = notificationData;
-            if (notificationData.encryptData) {
-                // Decrypt logic here if needed
             }
 
             return {
@@ -176,7 +174,8 @@ class TelebirrPayment {
                 {
                     headers: {
                         'Content-Type': 'application/json'
-                    }
+                    },
+                    timeout: 30000
                 }
             );
 
@@ -195,56 +194,6 @@ class TelebirrPayment {
             }
         } catch (error) {
             console.error('Status check failed:', error);
-            return {
-                success: false,
-                error: error.message
-            };
-        }
-    }
-
-    // Refund payment
-    async refundPayment(transactionId, amount) {
-        try {
-            const timestamp = Date.now().toString();
-            const nonce = crypto.randomBytes(16).toString('hex');
-            
-            const refundData = {
-                appId: this.appId,
-                outTradeNo: transactionId,
-                refundAmount: amount.toString(),
-                timestamp: timestamp,
-                nonce: nonce
-            };
-
-            const signature = this.generateSignature(refundData);
-
-            const response = await axios.post(
-                `${this.apiUrl}/api/refund/payment`,
-                {
-                    appId: this.appId,
-                    sign: signature,
-                    encryptData: this.encryptData(refundData)
-                },
-                {
-                    headers: {
-                        'Content-Type': 'application/json'
-                    }
-                }
-            );
-
-            if (response.data && response.data.code === 0) {
-                return {
-                    success: true,
-                    refundId: response.data.data.refundId
-                };
-            } else {
-                return {
-                    success: false,
-                    error: response.data.msg || 'Refund failed'
-                };
-            }
-        } catch (error) {
-            console.error('Refund failed:', error);
             return {
                 success: false,
                 error: error.message
