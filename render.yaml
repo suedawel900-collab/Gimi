@@ -1,0 +1,76 @@
+# render.yaml - Complete Render Blueprint Configuration
+services:
+  - type: web
+    name: mk-bingo-bot
+    runtime: node
+    repo: https://github.com/YOUR_USERNAME/mk-bingo-bot
+    branch: main
+    plan: starter
+    region: frankfurt
+    buildCommand: npm run render-build
+    startCommand: npm start
+    healthCheckPath: /health
+    
+    # Environment Variables
+    envVars:
+      # Required
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: RENDER
+        value: "true"
+      - key: DB_PATH
+        value: /var/data/bingo.db
+      
+      # Set these in Render Dashboard (sync: false)
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_IDS
+        sync: false
+      
+      # Game Defaults
+      - key: DEFAULT_BALANCE
+        value: 1000
+      - key: DEFAULT_CARD_PRICE
+        value: 10
+      - key: DEFAULT_PRIZE
+        value: 2000
+      - key: MAX_CARDS_PER_BUY
+        value: 10
+      - key: MAX_CARD_NUMBER
+        value: 999
+      - key: MIN_CARD_NUMBER
+        value: 100
+      
+      # Telebirr Configuration (optional)
+      - key: TELEBIRR_ENVIRONMENT
+        value: test
+      - key: TELEBIRR_RETURN_URL
+        value: https://mk-bingo-bot.onrender.com/payment/success
+      - key: TELEBIRR_NOTIFY_URL
+        value: https://mk-bingo-bot.onrender.com/payment/notify
+      
+      # Telebirr Credentials (set in dashboard)
+      - key: TELEBIRR_APP_ID
+        sync: false
+      - key: TELEBIRR_APP_KEY
+        sync: false
+      - key: TELEBIRR_SHORT_CODE
+        sync: false
+      - key: TELEBIRR_PUBLIC_KEY
+        sync: false
+    
+    # Persistent Disk for Database (REQUIRED)
+    disk:
+      name: bingo-data
+      mountPath: /var/data
+      sizeGB: 1
+    
+    # Auto-deploy on git push
+    autoDeploy: true
+    
+    # Logging
+    logging:
+      maxSize: 10MB
+      maxFiles: 5
