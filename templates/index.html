@@ -1,1 +1,1089 @@
-.
+<!DOCTYPE html>
+<html lang="am">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MK BINGO DELUXE - Telegram Web App</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        * { 
+            box-sizing: border-box; 
+            margin: 0; 
+            padding: 0; 
+        }
+        
+        :root { 
+            --primary: #fdbb2d; 
+            --secondary: #b21f1f; 
+            --glass: rgba(255, 255, 255, 0.1); 
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a2a6c, #b21f1f, #fdbb2d);
+            min-height: 100vh; 
+            color: white; 
+            padding: 20px; 
+            background-attachment: fixed;
+            margin: 0;
+        }
+
+        /* Tabs */
+        .tabs { 
+            display: flex; 
+            justify-content: center; 
+            gap: 20px; 
+            margin-bottom: 30px; 
+            flex-wrap: wrap;
+        }
+        
+        .tab {
+            padding: 12px 35px; 
+            font-size: 18px; 
+            border-radius: 50px; 
+            background: rgba(0, 0, 0, 0.5);
+            color: white; 
+            cursor: pointer; 
+            font-weight: bold; 
+            border: 2px solid transparent; 
+            transition: 0.3s;
+        }
+        
+        .tab.active { 
+            background: linear-gradient(45deg, #fdbb2d, #b21f1f); 
+            border: 2px solid white; 
+            box-shadow: 0 0 20px #fdbb2d; 
+        }
+
+        /* Containers */
+        .container {
+            max-width: 1200px; 
+            margin: 0 auto; 
+            background: rgba(255, 255, 255, 0.1);
+            padding: 25px; 
+            border-radius: 30px; 
+            backdrop-filter: blur(15px);
+            border: 2px solid rgba(255,255,255,0.2); 
+            display: none;
+        }
+        
+        .container.active { 
+            display: block; 
+            animation: fadeIn 0.5s ease; 
+        }
+
+        /* Card Grid Selection */
+        .card-grid {
+            display: grid; 
+            grid-template-columns: repeat(auto-fill, minmax(65px, 1fr));
+            gap: 10px; 
+            padding: 20px; 
+            background: rgba(0,0,0,0.3); 
+            border-radius: 20px;
+            max-height: 400px; 
+            overflow-y: auto; 
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .box {
+            background: white; 
+            color: #333; 
+            padding: 15px 5px; 
+            border-radius: 10px;
+            text-align: center; 
+            font-weight: bold; 
+            cursor: pointer; 
+            transition: 0.3s;
+        }
+        
+        .box.selected { 
+            background: #4CAF50; 
+            color: white; 
+            transform: scale(1.1); 
+            box-shadow: 0 0 15px #4CAF50; 
+        }
+        
+        .box.sold-out { 
+            background: #ff4d4d !important; 
+            color: white; 
+            cursor: not-allowed; 
+            opacity: 0.6; 
+            text-decoration: line-through; 
+        }
+
+        /* Game Page Elements */
+        .number-ball {
+            display: inline-block; 
+            width: 55px; 
+            height: 55px; 
+            border-radius: 50%;
+            background: radial-gradient(circle at 30% 30%, #fdbb2d, #b21f1f);
+            color: white; 
+            text-align: center; 
+            line-height: 55px; 
+            margin: 5px;
+            font-weight: bold; 
+            font-size: 22px; 
+            border: 2px solid white; 
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            animation: popIn 0.3s ease;
+        }
+
+        @keyframes popIn {
+            0% { transform: scale(0); }
+            70% { transform: scale(1.2); }
+            100% { transform: scale(1); }
+        }
+        
+        .bingo-btn {
+            background: linear-gradient(135deg, #ff4444, #b21f1f); 
+            color: white; 
+            font-size: 2.2em;
+            padding: 20px 60px; 
+            border-radius: 50px; 
+            border: 3px solid gold; 
+            cursor: pointer;
+            margin: 20px 0; 
+            animation: pulse 1.5s infinite; 
+            text-shadow: 0 2px 5px rgba(0,0,0,0.5);
+            font-weight: bold;
+            transition: transform 0.3s;
+        }
+        
+        .bingo-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 30px rgba(255,68,68,0.5);
+        }
+
+        .bingo-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            animation: none;
+            transform: none;
+        }
+
+        /* Overlays */
+        .overlay {
+            position: fixed; 
+            top: 0; 
+            left: 0; 
+            width: 100%; 
+            height: 100%;
+            background: rgba(0,0,0,0.98); 
+            display: none; 
+            flex-direction: column;
+            align-items: center; 
+            justify-content: center; 
+            z-index: 9999; 
+            backdrop-filter: blur(10px);
+            padding: 20px;
+        }
+
+        /* Bingo Card Display */
+        .gridCard { 
+            display: grid; 
+            grid-template-columns: repeat(5, 1fr); 
+            gap: 5px; 
+            background: #ddd; 
+            padding: 5px; 
+            border-radius: 10px; 
+            max-width: 300px;
+            margin: 0 auto;
+        }
+        
+        .cell { 
+            background: white; 
+            color: black; 
+            padding: 10px; 
+            text-align: center; 
+            font-weight: bold; 
+            border-radius: 5px; 
+            font-size: 14px;
+        }
+        
+        .cell.marked { 
+            background: #4CAF50; 
+            color: white; 
+            animation: markPop 0.5s ease;
+        }
+        
+        .cell.free { 
+            background: gold; 
+            color: black;
+        }
+
+        @keyframes markPop {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.2); background: #fdbb2d; }
+            100% { transform: scale(1); }
+        }
+
+        @keyframes fadeIn { 
+            from { opacity: 0; transform: translateY(10px); } 
+            to { opacity: 1; transform: translateY(0); } 
+        }
+        
+        @keyframes pulse { 
+            0% { transform: scale(1); box-shadow: 0 0 10px #ff4444; } 
+            50% { transform: scale(1.05); box-shadow: 0 0 30px #ff4444; } 
+            100% { transform: scale(1); } 
+        }
+        
+        /* Toast Notifications */
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #333;
+            color: white;
+            padding: 15px 25px;
+            border-radius: 10px;
+            border-left: 5px solid gold;
+            z-index: 10000;
+            animation: slideIn 0.3s ease;
+            max-width: 300px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.3);
+        }
+        
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        
+        /* Payment Button */
+        .telebirr-btn {
+            width: 100%; 
+            padding: 18px; 
+            background: #674EA7; 
+            border: none; 
+            border-radius: 50px; 
+            color: white; 
+            font-weight: bold; 
+            cursor: pointer; 
+            font-size: 1.1em;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            transition: transform 0.3s, box-shadow 0.3s;
+            margin-top: 10px;
+        }
+
+        .telebirr-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(103, 78, 167, 0.4);
+        }
+
+        .telebirr-btn img {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            background: white;
+            padding: 5px;
+        }
+
+        /* Loading Spinner */
+        .spinner {
+            border: 4px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top: 4px solid gold;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .tabs { gap: 10px; }
+            .tab { padding: 10px 20px; font-size: 16px; }
+            .bingo-btn { font-size: 1.8em; padding: 15px 40px; }
+            .number-ball { width: 45px; height: 45px; line-height: 45px; font-size: 18px; }
+            .card-grid { grid-template-columns: repeat(auto-fill, minmax(50px, 1fr)); }
+            .box { padding: 10px 2px; font-size: 12px; }
+        }
+
+        /* Balance Display */
+        .balance-box {
+            background: linear-gradient(135deg, rgba(0,0,0,0.4), rgba(0,0,0,0.2));
+            border-radius: 20px;
+            padding: 20px;
+            text-align: center;
+            margin-bottom: 20px;
+            border: 2px solid gold;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .balance-box::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: linear-gradient(45deg, transparent, rgba(255,215,0,0.1), transparent);
+            animation: shine 3s infinite;
+        }
+
+        @keyframes shine {
+            0% { transform: translateX(-100%) translateY(-100%) rotate(45deg); }
+            100% { transform: translateX(100%) translateY(100%) rotate(45deg); }
+        }
+
+        .balance-amount {
+            font-size: 2.5em;
+            font-weight: bold;
+            color: gold;
+            text-shadow: 0 0 20px rgba(255,215,0,0.5);
+        }
+
+        /* Admin Panel */
+        .admin-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .stat-card {
+            background: rgba(255,255,255,0.1);
+            padding: 15px;
+            border-radius: 15px;
+            text-align: center;
+            border: 1px solid rgba(255,215,0,0.3);
+        }
+
+        .stat-value {
+            font-size: 1.8em;
+            color: gold;
+            font-weight: bold;
+        }
+
+        /* Winner Overlay */
+        .winner-card {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            max-width: 400px;
+            margin: 20px auto;
+            animation: winnerPulse 2s infinite;
+        }
+
+        @keyframes winnerPulse {
+            0% { box-shadow: 0 0 30px gold; }
+            50% { box-shadow: 0 0 60px gold, 0 0 90px #ffd700; }
+            100% { box-shadow: 0 0 30px gold; }
+        }
+
+        /* House Wins Overlay */
+        .house-overlay {
+            background: linear-gradient(135deg, #b21f1f, #8B0000);
+            animation: housePulse 3s infinite;
+        }
+
+        @keyframes housePulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.9; }
+            100% { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="tabs">
+        <button class="tab active" id="p-tab" onclick="switchTab('player')">👤 ተጫዋች</button>
+        <button id="admin-tab-btn" class="tab" style="display:none;" onclick="switchTab('admin')">👑 አድሚን</button>
+    </div>
+
+    <!-- Player Tab -->
+    <div id="playerTab" class="container active">
+        <h1 style="text-align: center; margin-bottom: 20px; text-shadow: 0 0 15px gold; font-size: 2em;">🎰 MK BINGO DELUXE</h1>
+        
+        <!-- Balance Display -->
+        <div class="balance-box">
+            <h2 style="font-size: 1.2em; margin-bottom: 10px;">💰 ባላንስ</h2>
+            <div class="balance-amount" id="playerBalance">1000</div>
+            <div style="font-size: 0.9em; opacity: 0.8;">ETB</div>
+        </div>
+
+        <!-- Card Selection Page -->
+        <div id="selectPage">
+            <h3 style="margin-bottom: 15px; text-align: center;">ካርድ ይምረጡ (1-1000)</h3>
+            <div id="grid" class="card-grid"></div>
+            
+            <!-- Summary and Payment Options -->
+            <div style="text-align: center; margin-top: 20px; background: rgba(0,0,0,0.4); padding: 20px; border-radius: 20px;">
+                <p style="font-size: 1.2em; margin-bottom: 15px;">
+                    የተመረጡ: <span id="selectedCount" style="color: gold; font-weight: bold;">0</span> | 
+                    ጠቅላላ ዋጋ: <span id="totalPrice" style="color: gold; font-weight: bold;">0</span> ETB
+                </p>
+                
+                <!-- Balance Payment Button -->
+                <button onclick="confirmCards()" 
+                        style="width: 100%; padding: 18px; background: #27ae60; border: none; 
+                               border-radius: 50px; color: white; font-weight: bold; 
+                               margin-top: 15px; cursor: pointer; font-size: 1.1em;
+                               transition: transform 0.3s;">
+                    💳 ካርድ ግዛ እና ተቀላቀል
+                </button>
+
+                <!-- Telebirr Payment Button -->
+                <button onclick="payWithTelebirr()" class="telebirr-btn">
+                    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%23674EA7'/%3E%3Ctext x='50' y='70' font-size='50' text-anchor='middle' fill='white' font-weight='bold'%3Eቴ%3C/text%3E%3C/svg%3E" 
+                         alt="Telebirr" style="width: 30px; height: 30px;">
+                    በቴሌብር ክፈል
+                </button>
+                
+                <p style="font-size: 0.8em; color: #ccc; margin-top: 10px;">
+                    ወይም ካለህ ባላንስ መጠቀም ትችላለህ
+                </p>
+            </div>
+        </div>
+
+        <!-- Game Page -->
+        <div id="gamePage" style="display: none; text-align: center;">
+            <!-- Timer -->
+            <div id="timerDisplay" style="font-size: 2em; color: gold; margin-bottom: 15px; font-weight: bold;">00:00</div>
+            
+            <!-- Called Numbers Display -->
+            <div class="called-numbers-box" style="background: rgba(0,0,0,0.4); padding: 20px; border-radius: 20px; min-height: 120px; margin-bottom: 20px;">
+                <h4 style="margin-bottom: 15px; color: gold;">የተጠሩ ቁጥሮች</h4>
+                <div id="numbersList" style="display: flex; flex-wrap: wrap; justify-content: center;"></div>
+            </div>
+            
+            <!-- BINGO Button -->
+            <button class="bingo-btn" id="bingoBtn" onclick="callBingo()" disabled>BINGO!</button>
+            
+            <!-- Player's Cards -->
+            <div id="gameCards" style="display: flex; flex-wrap: wrap; justify-content: center; gap: 20px; margin-top: 20px;"></div>
+        </div>
+    </div>
+
+    <!-- Admin Tab -->
+    <div id="adminTab" class="container">
+        <h2 style="color: gold; border-bottom: 2px solid gold; padding-bottom: 10px; margin-bottom: 20px; text-align: center;">👑 የአድሚን መቆጣጠሪያ</h2>
+        
+        <!-- Admin Controls -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 25px;">
+            <div style="background: rgba(255,255,255,0.1); padding: 20px; border-radius: 15px;">
+                <label style="display: block; margin-bottom: 8px;">የካርድ ዋጋ (ETB):</label>
+                <input type="number" id="cardPriceInput" value="10" min="1" 
+                       style="width: 100%; padding: 12px; border-radius: 8px; border: none; font-size: 16px;">
+            </div>
+            <div style="background: rgba(255,255,255,0.1); padding: 20px; border-radius: 15px;">
+                <label style="display: block; margin-bottom: 8px;">የሽልማት አይነት:</label>
+                <select id="gameTypeInput" style="width: 100%; padding: 12px; border-radius: 8px; border: none; font-size: 16px;">
+                    <option value="full_house">Full House</option>
+                    <option value="one_row">One Row</option>
+                    <option value="one_column">One Column</option>
+                    <option value="four_corners">Four Corners</option>
+                    <option value="x_shape">X Shape</option>
+                    <option value="random">Random</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Admin Action Buttons -->
+        <button onclick="startNewRound()" 
+                style="width: 100%; padding: 18px; background: #27ae60; color: white; 
+                       border: none; border-radius: 15px; font-weight: bold; 
+                       margin-bottom: 15px; cursor: pointer; font-size: 1.1em;">
+            🆕 አዲስ ዙር አስጀምር
+        </button>
+        
+        <button onclick="drawNumber()" 
+                style="width: 100%; padding: 22px; background: #2980b9; color: white; 
+                       border: none; border-radius: 15px; font-weight: bold; 
+                       font-size: 1.3em; cursor: pointer; margin-bottom: 20px;
+                       animation: pulse 2s infinite;">
+            🎲 ቁጥር ጥራ (DRAW)
+        </button>
+
+        <!-- Admin Statistics -->
+        <div class="admin-stats">
+            <div class="stat-card">
+                <div style="font-size: 0.9em; margin-bottom: 5px;">የተሸጡ ካርዶች</div>
+                <div class="stat-value" id="adminTotalCards">0</div>
+            </div>
+            <div class="stat-card">
+                <div style="font-size: 0.9em; margin-bottom: 5px;">የተሰበሰበ ብር</div>
+                <div class="stat-value" id="adminTotalPool">0</div>
+                <div style="font-size: 0.7em;">ETB</div>
+            </div>
+            <div class="stat-card">
+                <div style="font-size: 0.9em; margin-bottom: 5px;">የተጠሩ ቁጥሮች</div>
+                <div class="stat-value" id="adminNumbersCount">0</div>
+                <div style="font-size: 0.7em;">/75</div>
+            </div>
+        </div>
+
+        <!-- Recent Numbers Log -->
+        <div style="background: rgba(0,0,0,0.4); padding: 15px; border-radius: 15px; margin-top: 20px;">
+            <h4 style="color: gold; margin-bottom: 10px;">የተጠሩ ቁጥሮች ታሪክ</h4>
+            <div id="adminNumbersLog" style="max-height: 100px; overflow-y: auto; font-size: 0.9em;">
+                እስካሁን ምንም ቁጥር አልተጠራም
+            </div>
+        </div>
+    </div>
+
+    <!-- Winner Overlay -->
+    <div id="winner-overlay" class="overlay">
+        <div style="text-align: center; animation: fadeIn 1s;">
+            <div style="font-size: 6em; margin-bottom: 20px;">🏆</div>
+            <h1 style="color: gold; font-size: 4em; text-shadow: 0 0 20px gold; margin: 10px 0;">BINGO!</h1>
+            <h2 id="winner-name" style="font-size: 2em; margin: 10px 0; color: white;"></h2>
+            <div id="winner-card-box" style="margin: 30px 0;"></div>
+            <button onclick="closeWinnerOverlay()" 
+                    style="padding: 18px 60px; background: gold; border: none; 
+                           border-radius: 50px; font-weight: bold; font-size: 1.2em; 
+                           cursor: pointer; transition: transform 0.3s;">
+                ቀጥል
+            </button>
+        </div>
+    </div>
+
+    <!-- House Wins Overlay -->
+    <div id="house-wins-overlay" class="overlay" style="background: linear-gradient(135deg, #8B0000, #b21f1f);">
+        <div style="text-align: center; animation: fadeIn 1s;">
+            <div style="font-size: 6em; margin-bottom: 20px;">🏠</div>
+            <h1 style="color: white; font-size: 3em; margin: 10px 0;">🛑 ጨዋታው ተጠናቋል</h1>
+            <h2 style="color: gold; font-size: 2.5em; margin: 15px 0;">አሸናፊ የለም!</h2>
+            <p style="text-align: center; max-width: 80%; margin: 20px auto; 
+                      line-height: 1.6; font-size: 1.2em;">
+                ሁሉም 75 ቁጥሮች ተጠርተዋል ግን ማንም ቢንጎ አላለም። 
+                ገንዘቡ ወደ አስተዳዳሪው ገቢ ሆኗል።
+            </p>
+            <button onclick="closeHouseOverlay()" 
+                    style="margin-top: 30px; padding: 18px 60px; background: white; 
+                           color: #b21f1f; border: none; border-radius: 50px; 
+                           font-weight: bold; font-size: 1.2em; cursor: pointer;
+                           transition: transform 0.3s;">
+                እሺ
+            </button>
+        </div>
+    </div>
+
+    <!-- Loading Spinner (hidden by default) -->
+    <div id="loading-spinner" style="display: none; position: fixed; top: 0; left: 0; 
+                                      width: 100%; height: 100%; background: rgba(0,0,0,0.8); 
+                                      z-index: 10001; justify-content: center; align-items: center;
+                                      flex-direction: column;">
+        <div class="spinner"></div>
+        <div style="margin-top: 20px; color: gold;">እባክዎ ይጠብቁ...</div>
+    </div>
+
+    <script>
+        // ==================== INITIALIZATION ====================
+        const socket = io();
+        const tg = window.Telegram.WebApp;
+        const ADMIN_ID = 12345678; // ⚠️ ያንተን የቴሌግራም ID እዚህ አስገባ!
+
+        let user = tg.initDataUnsafe?.user || { id: 0, first_name: "ተጫዋች" };
+        let selectedCards = {};
+        let cardPrice = 10;
+        let myCards = {};
+        let currentBalance = 1000;
+        let gameActive = false;
+        let bingoEnabled = false;
+        let calledNumbers = [];
+        let currentGameId = null;
+        let timerInterval = null;
+        let timerSeconds = 0;
+
+        // Initialize Telegram Web App
+        tg.expand();
+        tg.ready();
+        tg.MainButton.setText("Loading...");
+        tg.MainButton.show();
+
+        // Show admin tab if user is admin
+        if (user.id === ADMIN_ID) {
+            document.getElementById('admin-tab-btn').style.display = 'block';
+        }
+
+        // ==================== CREATE CARD GRID (1-1000) ====================
+        const grid = document.getElementById("grid");
+        for (let i = 1; i <= 1000; i++) {
+            let d = document.createElement("div");
+            d.className = "box"; 
+            d.innerText = i; 
+            d.id = `card-${i}`;
+            
+            d.onclick = () => {
+                if (d.classList.contains('sold-out')) return;
+                if (selectedCards[i]) {
+                    delete selectedCards[i];
+                    d.classList.remove('selected');
+                } else {
+                    selectedCards[i] = generateBingoNumbers(i);
+                    d.classList.add('selected');
+                }
+                updateSummary();
+            };
+            grid.appendChild(d);
+        }
+
+        // ==================== HELPER FUNCTIONS ====================
+
+        function generateBingoNumbers(seed) {
+            let nums = [];
+            for(let i = 0; i < 25; i++) {
+                if (i === 12) {
+                    nums.push("FREE");
+                } else {
+                    nums.push(Math.floor(Math.random() * 75) + 1);
+                }
+            }
+            return nums;
+        }
+
+        function updateSummary() {
+            let count = Object.keys(selectedCards).length;
+            document.getElementById("selectedCount").innerText = count;
+            document.getElementById("totalPrice").innerText = count * cardPrice;
+        }
+
+        function switchTab(tab) {
+            document.querySelectorAll('.container').forEach(c => c.classList.remove('active'));
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.getElementById(tab + 'Tab').classList.add('active');
+            if(tab === 'player') {
+                document.getElementById('p-tab').classList.add('active');
+            } else {
+                document.getElementById('admin-tab-btn').classList.add('active');
+                updateAdminStats();
+            }
+        }
+
+        function showToast(message, type = 'info') {
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            
+            // Set border color based on type
+            if (type === 'success') {
+                toast.style.borderLeftColor = '#4CAF50';
+            } else if (type === 'error') {
+                toast.style.borderLeftColor = '#ff4444';
+            } else {
+                toast.style.borderLeftColor = 'gold';
+            }
+            
+            toast.innerText = message;
+            document.body.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.style.animation = 'slideIn 0.3s reverse';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        function showLoading() {
+            document.getElementById('loading-spinner').style.display = 'flex';
+        }
+
+        function hideLoading() {
+            document.getElementById('loading-spinner').style.display = 'none';
+        }
+
+        function startTimer() {
+            if (timerInterval) clearInterval(timerInterval);
+            timerSeconds = 0;
+            timerInterval = setInterval(() => {
+                timerSeconds++;
+                const mins = Math.floor(timerSeconds / 60);
+                const secs = timerSeconds % 60;
+                document.getElementById('timerDisplay').innerText = 
+                    `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            }, 1000);
+        }
+
+        function stopTimer() {
+            if (timerInterval) {
+                clearInterval(timerInterval);
+                timerInterval = null;
+            }
+        }
+
+        // ==================== GAME FUNCTIONS ====================
+
+        function confirmCards() {
+            const cardIds = Object.keys(selectedCards).map(Number);
+            if (cardIds.length === 0) {
+                showToast("እባክዎ መጀመሪያ ካርድ ይምረጡ!", 'error');
+                return;
+            }
+            
+            tg.MainButton.setText("Processing...");
+            tg.MainButton.showProgress(true);
+            
+            socket.emit('buy_card', { 
+                user_id: user.id, 
+                cards: cardIds, 
+                name: user.first_name 
+            });
+        }
+
+        async function payWithTelebirr() {
+            const cardIds = Object.keys(selectedCards).map(Number);
+            if (cardIds.length === 0) {
+                showToast("እባክዎ መጀመሪያ ካርድ ይምረጡ!", 'error');
+                return;
+            }
+
+            const totalAmount = cardIds.length * cardPrice;
+            
+            showLoading();
+            tg.MainButton.setText("Processing...");
+            tg.MainButton.showProgress(true);
+
+            try {
+                const response = await fetch('/api/create-payment', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        userId: user.id,
+                        cardCount: cardIds.length,
+                        amount: totalAmount,
+                        userName: user.first_name,
+                        cards: cardIds
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    // Store transaction info temporarily
+                    sessionStorage.setItem('pendingTransaction', JSON.stringify({
+                        transactionId: data.transactionId,
+                        cards: cardIds,
+                        amount: totalAmount
+                    }));
+                    
+                    // Redirect to Telebirr payment page
+                    window.location.href = data.paymentUrl;
+                } else {
+                    showToast("ክፍያ መፍጠር አልተሳካም: " + (data.error || ''), 'error');
+                }
+            } catch (error) {
+                console.error('Payment error:', error);
+                showToast("ስህተት ተከስቷል. እባክዎ እንደገና ይሞክሩ.", 'error');
+            } finally {
+                hideLoading();
+                tg.MainButton.hideProgress();
+            }
+        }
+
+        function renderMyCards() {
+            const container = document.getElementById('gameCards');
+            container.innerHTML = "";
+            
+            if (Object.keys(myCards).length === 0) {
+                container.innerHTML = '<p style="color: #ccc;">ምንም ካርድ የለም</p>';
+                return;
+            }
+            
+            for (let id in myCards) {
+                let cardDiv = document.createElement('div');
+                cardDiv.style.background = 'rgba(255,255,255,0.1)';
+                cardDiv.style.padding = '15px';
+                cardDiv.style.borderRadius = '15px';
+                cardDiv.style.width = '300px';
+                cardDiv.style.margin = '10px auto';
+                
+                let title = document.createElement('h4');
+                title.style.marginBottom = '10px';
+                title.style.color = 'gold';
+                title.innerText = `Card #${id}`;
+                cardDiv.appendChild(title);
+                
+                let g = document.createElement('div');
+                g.className = "gridCard";
+                myCards[id].forEach(n => {
+                    let c = document.createElement('div');
+                    c.className = "cell" + (n === "FREE" ? " free" : "");
+                    if (n !== "FREE" && calledNumbers && calledNumbers.includes(n)) {
+                        c.classList.add('marked');
+                    }
+                    c.innerText = n;
+                    g.appendChild(c);
+                });
+                cardDiv.appendChild(g);
+                container.appendChild(cardDiv);
+            }
+            tg.MainButton.hideProgress();
+        }
+
+        // ==================== ADMIN FUNCTIONS ====================
+
+        function startNewRound() {
+            cardPrice = parseInt(document.getElementById('cardPriceInput').value);
+            const gameType = document.getElementById('gameTypeInput').value;
+            
+            socket.emit('admin_start_round', { 
+                price: cardPrice,
+                gameType: gameType 
+            });
+            
+            showToast("አዲስ ዙር ተጀምሯል!", 'success');
+            
+            // Clear game page
+            document.getElementById('numbersList').innerHTML = '';
+            calledNumbers = [];
+            bingoEnabled = false;
+            document.getElementById('bingoBtn').disabled = true;
+            stopTimer();
+            startTimer();
+        }
+
+        function drawNumber() {
+            socket.emit('admin_draw_number');
+        }
+
+        function callBingo() {
+            if (!bingoEnabled) {
+                showToast("BINGO አይገኝም አሁን!", 'error');
+                return;
+            }
+            
+            showLoading();
+            socket.emit('claim_bingo', { 
+                user_id: user.id, 
+                name: user.first_name 
+            });
+        }
+
+        function closeWinnerOverlay() {
+            document.getElementById('winner-overlay').style.display = 'none';
+        }
+
+        function closeHouseOverlay() {
+            document.getElementById('house-wins-overlay').style.display = 'none';
+        }
+
+        async function updateAdminStats() {
+            try {
+                const response = await fetch('/api/stats');
+                const stats = await response.json();
+                if (stats.active) {
+                    document.getElementById('adminTotalCards').innerText = stats.total_cards || 0;
+                    document.getElementById('adminTotalPool').innerText = (stats.total_cards * stats.card_price) || 0;
+                    document.getElementById('adminNumbersCount').innerText = stats.called_count || 0;
+                    
+                    // Update numbers log
+                    if (stats.called_numbers && stats.called_numbers.length > 0) {
+                        const logDiv = document.getElementById('adminNumbersLog');
+                        logDiv.innerHTML = stats.called_numbers.slice(-10).map(n => 
+                            `<span style="display: inline-block; margin: 2px; padding: 5px; 
+                                       background: rgba(255,215,0,0.2); border-radius: 5px;">${n}</span>`
+                        ).join(' ');
+                    }
+                }
+            } catch (e) {
+                console.log('Stats update failed');
+            }
+        }
+
+        // ==================== SOCKET EVENTS ====================
+
+        socket.on('connect', () => {
+            console.log('Connected to server');
+            tg.MainButton.hide();
+            
+            // Check for pending transaction
+            const pending = sessionStorage.getItem('pendingTransaction');
+            if (pending) {
+                const transaction = JSON.parse(pending);
+                // Check if payment was completed
+                fetch(`/api/payment-status/${transaction.transactionId}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.success && data.status === 'completed') {
+                            sessionStorage.removeItem('pendingTransaction');
+                            showToast('ክፍያ ተሳክቷል! ካርዶችዎ ዝግጁ ናቸው', 'success');
+                        }
+                    });
+            }
+        });
+
+        socket.on('purchase_success', (data) => {
+            myCards = JSON.parse(JSON.stringify(selectedCards));
+            currentBalance = data.newBalance;
+            document.getElementById('playerBalance').innerText = currentBalance;
+            
+            document.getElementById('selectPage').style.display = 'none';
+            document.getElementById('gamePage').style.display = 'block';
+            renderMyCards();
+            startTimer();
+            
+            showToast(`✅ ${Object.keys(selectedCards).length} ካርዶች ተገዙ!`, 'success');
+            selectedCards = {};
+            tg.MainButton.hideProgress();
+        });
+
+        socket.on('payment_completed', (data) => {
+            if (data.userId === user.id) {
+                myCards = {};
+                data.cards.forEach(cardId => {
+                    myCards[cardId] = selectedCards[cardId] || generateBingoNumbers(cardId);
+                });
+                
+                currentBalance = data.newBalance;
+                document.getElementById('playerBalance').innerText = currentBalance;
+                
+                document.getElementById('selectPage').style.display = 'none';
+                document.getElementById('gamePage').style.display = 'block';
+                renderMyCards();
+                startTimer();
+                
+                showToast(`✅ ${data.cards.length} ካርዶች ተገዙ!`, 'success');
+                selectedCards = {};
+            }
+        });
+
+        socket.on('card_locked', (data) => {
+            data.cards.forEach(id => {
+                const el = document.getElementById(`card-${id}`);
+                if (el) { 
+                    el.classList.add('sold-out'); 
+                    el.innerText = "SOLD"; 
+                }
+            });
+        });
+        
+        socket.on('number_update', (data) => {
+            const ball = document.createElement("span");
+            ball.className = "number-ball"; 
+            ball.innerText = data.num;
+            document.getElementById("numbersList").prepend(ball);
+            
+            // Limit displayed numbers
+            const numbersList = document.getElementById("numbersList");
+            while (numbersList.children.length > 20) {
+                numbersList.removeChild(numbersList.lastChild);
+            }
+            
+            calledNumbers = data.all_numbers || [];
+            
+            // Auto-mark logic on all cards
+            document.querySelectorAll('.cell').forEach(cell => {
+                if(cell.innerText == data.num) {
+                    cell.classList.add('marked');
+                }
+            });
+            
+            document.getElementById('adminNumbersCount').innerText = data.count;
+            
+            // Enable BINGO button after first number
+            if (data.count > 0 && !bingoEnabled) {
+                bingoEnabled = true;
+                document.getElementById('bingoBtn').disabled = false;
+            }
+            
+            // Update admin stats if visible
+            if (document.getElementById('adminTab').classList.contains('active')) {
+                updateAdminStats();
+            }
+        });
+
+        socket.on('new_round_started', (data) => {
+            cardPrice = data.card_price;
+            document.getElementById('numbersList').innerHTML = '';
+            calledNumbers = [];
+            bingoEnabled = false;
+            document.getElementById('bingoBtn').disabled = true;
+            
+            // Clear game page and show selection page
+            document.getElementById('gamePage').style.display = 'none';
+            document.getElementById('selectPage').style.display = 'block';
+            
+            // Reset selected cards
+            selectedCards = {};
+            document.querySelectorAll('.box').forEach(box => {
+                box.classList.remove('selected');
+            });
+            updateSummary();
+            
+            stopTimer();
+            
+            showToast('🔄 አዲስ ዙር ተጀምሯል!', 'success');
+        });
+
+        socket.on('show_winner', (data) => {
+            document.getElementById('winner-overlay').style.display = 'flex';
+            document.getElementById('winner-name').innerText = data.winner_name;
+            document.getElementById('winner-card-box').innerHTML = data.card_html;
+            
+            // Vibrate if supported
+            if (tg.HapticFeedback) {
+                tg.HapticFeedback.notification('success');
+            }
+            
+            bingoEnabled = false;
+            document.getElementById('bingoBtn').disabled = true;
+            hideLoading();
+            
+            // Stop timer
+            stopTimer();
+        });
+
+        socket.on('game_over_house_wins', () => {
+            document.getElementById('house-wins-overlay').style.display = 'flex';
+            bingoEnabled = false;
+            document.getElementById('bingoBtn').disabled = true;
+            stopTimer();
+            hideLoading();
+        });
+
+        socket.on('error_message', (msg) => {
+            showToast(msg, 'error');
+            tg.MainButton.hideProgress();
+            hideLoading();
+        });
+
+        // Update admin stats periodically
+        setInterval(() => {
+            if (document.getElementById('adminTab').classList.contains('active')) {
+                updateAdminStats();
+            }
+        }, 5000);
+
+        // Initialize
+        console.log('Web App initialized for user:', user);
+        tg.MainButton.hide();
+
+        // Handle back button
+        tg.BackButton.onClick(() => {
+            if (document.getElementById('gamePage').style.display === 'block') {
+                document.getElementById('gamePage').style.display = 'none';
+                document.getElementById('selectPage').style.display = 'block';
+                tg.BackButton.hide();
+            } else {
+                tg.close();
+            }
+        });
+
+        // Show back button when in game
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
+                if (mutation.target.style.display === 'block' && mutation.target.id === 'gamePage') {
+                    tg.BackButton.show();
+                }
+            });
+        });
+
+        observer.observe(document.getElementById('gamePage'), {
+            attributes: true,
+            attributeFilter: ['style']
+        });
+    </script>
+</body>
+</html>
